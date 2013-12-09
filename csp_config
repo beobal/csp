@@ -1,0 +1,6 @@
+[maven]
+repo-url=http://maven.repo.url/snapshots
+repo-id=snapshots-repo
+
+[cassandra]
+cassandra-dir=/home/src/cassandra

@@ -1,0 +1,52 @@
+Cassandra Snapshot Publisher - csp
+====================================================
+
+A script to build SNAPSHOT artifacts from Cassandra 
+and deploy them to Maven repositories.
+
+It can often be useful to work with the latest and
+greatest version of Cassandra (from trunk or a 
+release branch). Hoever, the Apache release processes
+mandate certain practices around deployment which can
+make it difficult to build and deploy SNAPSHOT artifacts
+to your local Maven repository without hacking the 
+Cassandra build files. 
+
+csp works by transforming Cassandra's build.xml to 
+remove the problematic elements, replacing them with 
+alternatives (e.g. it replaces the sign-and-deploy-file 
+from the mvn-gpg-plugin with the regular deploy:deploy-file 
+in the deployment macro). It also skips some of the more
+time consuming steps such as javadoc generation.
+
+Requirements
+------------
+
+- A working python installation (tested to work with python 2.7).
+
+Installation
+------------
+
+csp uses python distutils so from the source directory:
+sudo ./setup.py install
+
+Usage
+-----
+
+The following options may be passed on the command line:
+
+-c, --cassandra-dir : Path to the Cassandra source directory. 
+                      Defaults to the current working directory.
+-r, --revision      : Git revision that you want to build a snapshot
+                      from. Defaults to the current checked out HEAD
+-v, --version       : The version # that you want to give the snapshot
+                      Defaults to whatever is specified in build.xml
+-u, mvn-repo-url    : The URL of the Maven repo where you intend to 
+                      publish the snapshot artifacts
+-i, mvn-repo-id     : The identifier of the target repo from your 
+                      Maven settings.xml 
+
+Of these options, the Cassandra source directory and the Maven repo
+URL/id can be set using an ini file located at ~/.csp 
+Any options set on the command line will override those in the config
+file.

@@ -1,0 +1,192 @@
+#!/usr/bin/python
+
+import os, sys, getopt, tempfile
+from subprocess import check_call, CalledProcessError
+try:
+	import xml.etree.cElementTree as ET
+except ImportError:
+	import xml.etree.ElementTree as ET
+
+# xpaths used to find elements that we modify in the buildfile
+mvn_namespace="{antlib:org.apache.maven.artifact.ant}"
+mvn_deploy_elem_xpath='target[@name="maven-ant-tasks-init"]/macrodef[@name="deploy"]/sequential/{0}mvn'.format(mvn_namespace)
+mvn_install_elem_xpath='target[@name="mvn-install"]'
+artifacts_elem_xpath='target[@name="artifacts"]'
+publish_elem_xpath='target[@name="publish"]'
+
+def checkout_cassandra(src_dir, rev):
+	"""Checkout the specified git revision in the source tree. Note that
+	we don't make any attempt to revert HEAD to the previous commit
+	after running, so you may need to use revert your working copy manually"""
+	log("Checking out revision %s in C* home directory %s" % (rev, src_dir))
+	log("Your working copy will be left at this revision. You may need to revert it")
+	check_call(["git", "--git-dir=%s/.git" % src_dir,"checkout", "-q", rev])
+
+def modify_artifacts_target(build_xml):
+	"""Remove the dependency on the javadoc target and
+	the copy task which moves the javadoc into the dist dir"""
+	log("Modifying artifacts target")
+	artifacts_elem = build_xml.find(artifacts_elem_xpath)
+	artifacts_elem.attrib['depends'] = artifacts_elem.attrib['depends'].replace(",javadoc","")
+	javadoc_copy_elem = artifacts_elem.find('copy[@todir="${dist.dir}/javadoc"]')
+	artifacts_elem.remove(javadoc_copy_elem)
+	return build_xml
+
+def modify_mvn_install_target(build_xml):
+	"""Remove the dependency on javadoc-jar from the mvn-install
+	target as we won't publish that artifacts anyway. As the
+	javadoc jars won't now be built, we also skip installing them"""
+	log("Modifying mvn-install target")
+	install_elem = build_xml.find(mvn_install_elem_xpath)
+	install_elem.attrib['depends'] = install_elem.attrib['depends'].replace(",javadoc-jar","")
+	for child_elem in install_elem:
+		if ('classifier' in child_elem.attrib and child_elem.attrib['classifier'] == 'javadoc'):
+			install_elem.remove(child_elem)
+	return build_xml
+
+def modify_publish_target(build_xml):
+	"""Modify the "publish" target. We omit the "if=release"
+	condition and only publish the binary artifacts"""
+	log("Modifying mvn publish target")
+	publish_elem = build_xml.find(publish_elem_xpath)
+	del publish_elem.attrib['if']
+	for deploy_elem in publish_elem.findall('deploy'):
+		if (deploy_elem.attrib['pomFile'].endswith('-dist.pom') or 'classifier' in deploy_elem.attrib):
+			publish_elem.remove(deploy_elem)
+	return build_xml
+
+def modify_mvn_deploy_macro(build_xml):
+	"""Here we modify the macrodef that defines the mvn:deploy operation.
+	We replace the org.apache.maven.plugins:maven-gpg-plugin:1.4:sign-and-deploy-file
+	goal with the standard "deploy:deploy-file" and we remove the profile argument
+	("-Papache-release")"""
+	log("Modifying mvn deploy macro")
+	mvn_deploy_elem = build_xml.find(mvn_deploy_elem_xpath)
+	mvn_goal_elem = mvn_deploy_elem.find('arg[@value="org.apache.maven.plugins:maven-gpg-plugin:1.4:sign-and-deploy-file"]')
+	mvn_goal_elem.set('value', 'deploy:deploy-file')
+	mvn_profile_elem = mvn_deploy_elem.find('arg[@value="-Papache-release"]')
+	mvn_deploy_elem.remove(mvn_profile_elem)
+	return build_xml
+
+def do_publish(src_dir, rev, version, repo_url, repo_id):
+	if (rev and rev != "HEAD"):
+			checkout_cassandra(src_dir, rev)
+
+	log("Publishing C* artifacts")
+	path = os.path.join("%s/build.xml" % src_dir)
+	build_file = open(path, "r")
+	build_xml = ET.fromstring(build_file.read())
+
+	build_xml = modify_publish_target(build_xml)
+	build_xml = modify_mvn_install_target(build_xml)
+	build_xml = modify_artifacts_target(build_xml)
+	build_xml = modify_mvn_deploy_macro(build_xml)
+
+	new_build_file = tempfile.NamedTemporaryFile(mode='w', delete=False)
+	new_build_file.write(ET.tostring(build_xml))
+	new_build_file.close()
+
+	log("Generated temporary build file at %s, running ant targets" % new_build_file.name)
+	try:
+		args = ["ant", "-f", new_build_file.name, "realclean"]
+		check_call(args)
+
+		args = ["ant", "-f", new_build_file.name, 
+			"maven-ant-tasks-init", "publish", 
+			"-Dbasedir=%s" % src_dir,
+			"-Dmaven-repository-url=%s" % repo_url, 
+			"-Dmaven-repository-id=%s" % repo_id]
+		if (version is not None):
+			args.append("-Dversion=%s" % version) 
+		check_call(args)
+		
+		os.remove(new_build_file.name)
+	except CalledProcessError as e:
+		log("Ant execution raised error: %s" % e.output)
+
+def usage():
+	print 'csp -r <revision> -v <version> -s <src> -u <maven repo url> -i <maven repo id>'
+
+def log(msg=""):
+	print "*** ",msg
+
+def read_config():
+	user_home = os.path.expanduser("~")
+	config_location = os.path.join(user_home, ".csp")
+	repo_url, repo_id, src = (None, None, None)
+
+	if (os.path.isfile(config_location)):
+		import ConfigParser
+		config = ConfigParser.ConfigParser()
+		config.read(config_location)
+		if (config.has_section("maven")):
+			repo_url = config.get("maven","repo-url")
+			repo_id = config.get("maven","repo-id")
+		if (config.has_section("cassandra")):
+			src = config.get("cassandra","cassandra-dir")
+	return (repo_url, repo_id, src)
+
+def main(argv):
+	rev = None
+	version = None
+	repo_url, repo_id, src_dir = read_config()
+	if (src_dir is None): src_dir = os.getcwd()
+
+	try:
+		opts, args = getopt.getopt(argv,"hr:v:c:u:i:",["revision=","version=","cassandra-dir=","repo-url=","repo-id="])
+	except getopt.GetoptError:
+		usage()
+		sys.exit(2)
+
+	for opt, arg in opts:
+		if opt == '-h':
+			usage()
+			sys.exit()
+		elif opt in ("-r", "--revision"):
+			rev = arg
+		elif opt in ("-v", "--version"):
+			version = arg
+		elif opt in ("-c", "--cassandra-dir"):
+			src_dir = arg
+		elif opt in ("-u", "--repo-url"):
+			repo_url = arg
+		elif opt in ("-i", "--repo-id"):
+			repo_id = arg
+
+	if (repo_url is None or repo_id is None):
+		log("You must specify URL and ID for the target Maven repository, either on the command line or in ~/.csp")
+		usage()
+		sys.exit(2)
+
+	log()
+	log()
+	log("Build and publish C* artifacts to a Maven repository")
+	log()
+	log()
+
+	if version is not None and not version.endswith("-SNAPSHOT"):
+		version = version + "-SNAPSHOT"
+		log("************************ WARNING ************************")
+		log("Only SNAPSHOT deployments are supported. The -SNAPSHOT")
+		log("modifier will be appended to the supplied version number")
+		log("*********************************************************")
+
+	log('Building from Cassandra source dir ' + src_dir)
+	if rev is None: 
+		log('Using the current git HEAD')
+	else:
+		log('Which will be checked out at ' + rev)
+	if version is not None:
+		log('Target version is ' + version)
+	else:
+		log("Target version will be read from build.xml")
+
+	log ("Maven repository: %s (%s)" % (repo_url, repo_id))
+
+	log("")
+	log("")
+
+	do_publish(src_dir, rev, version, repo_url, repo_id)
+
+if __name__ == "__main__":
+	main(sys.argv[1:])
