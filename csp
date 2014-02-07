@@ -30,6 +30,7 @@ mvn_namespace = "{antlib:org.apache.maven.artifact.ant}"
 mvn_deploy_elem_xpath = 'target[@name="maven-ant-tasks-init"]/macrodef[@name="deploy"]/sequential/{0}mvn'\
                         .format(mvn_namespace)
 mvn_install_elem_xpath = 'target[@name="mvn-install"]'
+mvn_create_version_file_xpath = 'target[@name="createVersionPropFile"]'
 artifacts_elem_xpath = 'target[@name="artifacts"]'
 publish_elem_xpath = 'target[@name="publish"]'
 
@@ -94,6 +95,35 @@ def modify_mvn_deploy_macro(build_xml):
     return build_xml
 
 
+def modify_create_version_file_target(build_xml):
+    """Modify the createVersionPropFile target to capture the git sha1
+    and echo it to version.properties along with the CassandraVersion"""
+    log("Modifying createVersionPropFile target")
+    mvn_create_version_file_elem = build_xml.find(mvn_create_version_file_xpath)
+    mvn_create_version_file_elem.insert(0, build_exec_elem('git', 'src.revision', 'rev-parse HEAD'))
+    mvn_create_version_file_elem.insert(0, build_exec_elem('git', 'src.branch', 'rev-parse --abbrev-ref HEAD'))
+
+    property_file_elem = mvn_create_version_file_elem.find('propertyfile')
+    add_property_to_file(property_file_elem, 'SourceRevision', '${src.revision}')
+    add_property_to_file(property_file_elem, 'SourceBranch', '${src.branch}')
+    return build_xml
+
+
+def add_property_to_file(property_file_elem, key, value):
+    entry_elem = ET.SubElement(property_file_elem, 'entry')
+    entry_elem.set('key', key)
+    entry_elem.set('value', value)
+
+
+def build_exec_elem(executable, outputprop, line):
+    exec_elem = ET.Element('exec')
+    exec_elem.set('executable', executable)
+    exec_elem.set('outputproperty', outputprop)
+    arg_elem = ET.SubElement(exec_elem, 'arg')
+    arg_elem.set('line', line)
+    return exec_elem
+
+
 def do_publish(src_dir, rev, version, repo_url, repo_id):
     if rev and rev != "HEAD":
             checkout_cassandra(src_dir, rev)
@@ -107,6 +137,7 @@ def do_publish(src_dir, rev, version, repo_url, repo_id):
     build_xml = modify_mvn_install_target(build_xml)
     build_xml = modify_artifacts_target(build_xml)
     build_xml = modify_mvn_deploy_macro(build_xml)
+    build_xml = modify_create_version_file_target(build_xml)
 
     new_build_file = tempfile.NamedTemporaryFile(mode='w', delete=False)
     new_build_file.write(ET.tostring(build_xml))
