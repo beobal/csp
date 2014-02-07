@@ -162,10 +162,6 @@ def do_publish(src_dir, rev, version, repo_url, repo_id):
         log("Ant execution raised error: %s" % e.output)
 
 
-def usage():
-    print 'csp -r <revision> -v <version> -s <src> -u <maven repo url> -i <maven repo id>'
-
-
 def log(msg=""):
     print "*** ", msg
 
@@ -187,74 +183,156 @@ def read_config():
     return repo_url, repo_id, src
 
 
+class command(object):
+    def run(self, args):
+        pass
+
+
+class modify_build(command):
+    def usage(self):
+        print 'csp modify -f <outfile>'
+
+    def run(self, args):
+        repo_url, repo_id, src_dir = read_config()
+        if src_dir is None:
+            src_dir = os.getcwd()
+
+        file_path = None
+        try:
+            opts, args = getopt.getopt(args,
+                                       "f:",
+                                       ["file="])
+        except getopt.GetoptError:
+            self.usage()
+            sys.exit(2)
+
+        for opt, arg in opts:
+            if opt == '-h':
+                self.usage()
+                sys.exit()
+            elif opt in ("-f", "--file"):
+                file_path = arg
+
+        if file_path is None:
+            new_build_file = tempfile.NamedTemporaryFile(mode='w', delete=False)
+        else:
+            new_build_file = open(file_path, 'w')
+
+        log("Writing modified build file")
+        path = os.path.join("%s/build.xml" % src_dir)
+        build_file = open(path, "r")
+        build_xml = ET.fromstring(build_file.read())
+
+        build_xml = modify_publish_target(build_xml)
+        build_xml = modify_mvn_install_target(build_xml)
+        build_xml = modify_artifacts_target(build_xml)
+        build_xml = modify_mvn_deploy_macro(build_xml)
+        build_xml = modify_create_version_file_target(build_xml)
+
+        new_build_file.write(ET.tostring(build_xml))
+        new_build_file.close()
+
+        log("Generated temporary build file at %s" % new_build_file.name)
+
+
+class publish(command):
+    def usage(self):
+        print 'csp publish -r <revision> -v <version> -s <src> -u <maven repo url> -i <maven repo id>'
+
+    def run(self, args):
+        rev = None
+        version = None
+        repo_url, repo_id, src_dir = read_config()
+        if src_dir is None:
+            src_dir = os.getcwd()
+
+        try:
+            opts, args = getopt.getopt(args,
+                                       "hr:v:c:u:i:",
+                                       ["revision=",
+                                        "version=",
+                                        "cassandra-dir=",
+                                        "repo-url=",
+                                        "repo-id="])
+        except getopt.GetoptError:
+            self.usage()
+            sys.exit(2)
+
+        for opt, arg in opts:
+            if opt == '-h':
+                self.usage()
+                sys.exit()
+            elif opt in ("-r", "--revision"):
+                rev = arg
+            elif opt in ("-v", "--version"):
+                version = arg
+            elif opt in ("-c", "--cassandra-dir"):
+                src_dir = arg
+            elif opt in ("-u", "--repo-url"):
+                repo_url = arg
+            elif opt in ("-i", "--repo-id"):
+                repo_id = arg
+
+        if repo_url is None or repo_id is None:
+            log("You must specify URL and ID for the target Maven repository, either on the command line or in ~/.csp")
+            self.usage()
+            sys.exit(2)
+
+        log()
+        log()
+        log("Build and publish C* artifacts to a Maven repository")
+        log()
+        log()
+
+        if version is not None and not version.endswith("-SNAPSHOT"):
+            version += "-SNAPSHOT"
+            log("************************ WARNING ************************")
+            log("Only SNAPSHOT deployments are supported. The -SNAPSHOT")
+            log("modifier will be appended to the supplied version number")
+            log("*********************************************************")
+
+        log('Building from Cassandra source dir ' + src_dir)
+        if rev is None:
+            log('Using the current git HEAD')
+        else:
+            log('Which will be checked out at ' + rev)
+        if version is not None:
+            log('Target version is ' + version)
+        else:
+            log("Target version will be read from build.xml")
+
+        log("Maven repository: %s (%s)" % (repo_url, repo_id))
+
+        log("")
+        log("")
+
+        do_publish(src_dir, rev, version, repo_url, repo_id)
+
+
+def main_usage():
+    print """Usage: csp <command> <options>"""
+    print """Commands:
+        publish : generate modified buildfile, build and publish artifacts to a specified repo
+        modify  : just generate the modified buildfile
+run csp <command> -h for command-specific options"""
+
+
 def main(argv):
-    rev = None
-    version = None
-    repo_url, repo_id, src_dir = read_config()
-    if src_dir is None:
-        src_dir = os.getcwd()
+    if len(argv) < 1:
+        print "Missing arguments"
+        sys.exit(1)
 
-    try:
-        opts, args = getopt.getopt(argv,
-                                   "hr:v:c:u:i:",
-                                   ["revision=",
-                                    "version=",
-                                    "cassandra-dir=",
-                                    "repo-url=",
-                                    "repo-id="])
-    except getopt.GetoptError:
-        usage()
-        sys.exit(2)
-
-    for opt, arg in opts:
-        if opt == '-h':
-            usage()
-            sys.exit()
-        elif opt in ("-r", "--revision"):
-            rev = arg
-        elif opt in ("-v", "--version"):
-            version = arg
-        elif opt in ("-c", "--cassandra-dir"):
-            src_dir = arg
-        elif opt in ("-u", "--repo-url"):
-            repo_url = arg
-        elif opt in ("-i", "--repo-id"):
-            repo_id = arg
-
-    if repo_url is None or repo_id is None:
-        log("You must specify URL and ID for the target Maven repository, either on the command line or in ~/.csp")
-        usage()
-        sys.exit(2)
-
-    log()
-    log()
-    log("Build and publish C* artifacts to a Maven repository")
-    log()
-    log()
-
-    if version is not None and not version.endswith("-SNAPSHOT"):
-        version += "-SNAPSHOT"
-        log("************************ WARNING ************************")
-        log("Only SNAPSHOT deployments are supported. The -SNAPSHOT")
-        log("modifier will be appended to the supplied version number")
-        log("*********************************************************")
-
-    log('Building from Cassandra source dir ' + src_dir)
-    if rev is None: 
-        log('Using the current git HEAD')
+    arg1 = sys.argv[1].lower()
+    if arg1 == 'publish':
+        command = publish()
+    elif arg1 == 'modify':
+        command = modify_build()
     else:
-        log('Which will be checked out at ' + rev)
-    if version is not None:
-        log('Target version is ' + version)
-    else:
-        log("Target version will be read from build.xml")
+        print "Unrecognized command: %s" % arg1
+        main_usage()
+        sys.exit(1)
 
-    log("Maven repository: %s (%s)" % (repo_url, repo_id))
-
-    log("")
-    log("")
-
-    do_publish(src_dir, rev, version, repo_url, repo_id)
+    command.run(argv[1:])
 
 if __name__ == "__main__":
     main(sys.argv[1:])
