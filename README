@@ -1,14 +1,14 @@
 Cassandra Snapshot Publisher - csp
 ====================================================
 
-A script to build SNAPSHOT artifacts from Cassandra 
-and deploy them to Maven repositories.
+A script to build Cassandra artifacts and deploy them
+to Maven repositories.
 
 It can often be useful to work with the latest and
 greatest version of Cassandra (from trunk or a 
 release branch). However, the Apache release processes
 mandate certain practices around deployment which can
-make it difficult to build and deploy SNAPSHOT artifacts
+make it difficult to build and deploy artifacts
 to your local Maven repository without hacking the 
 Cassandra build files. 
 
@@ -18,6 +18,9 @@ alternatives (e.g. it replaces the sign-and-deploy-file
 from the mvn-gpg-plugin with the regular deploy:deploy-file 
 in the deployment macro). It also skips some of the more
 time consuming steps such as javadoc generation.
+
+(CSP is now something of a misnomer as it supports publishing
+release artifacts. Naming is hard).
 
 Requirements
 ------------
@@ -33,20 +36,41 @@ sudo ./setup.py install
 Usage
 -----
 
+csp has 2 commands, modify & publish
+
+modify simply transforms build.xml and writes the new version
+out to a location of your choice. You can then run whatever
+ant targets you like using the -f <build file> option.
+
 The following options may be passed on the command line:
 
 -c, --cassandra-dir : Path to the Cassandra source directory.
                       Defaults to the current working directory
 -r, --revision      : Git revision that you want to build a snapshot
                       from. Defaults to the current checked out HEAD
--v, --version       : The version # that you want to give the snapshot.
+-f, --file          : File to write the modified build.xml to
+
+
+publish performs the same transformations as modify but
+then goes on to execute ant using the new file to build and publish
+artifacts to a maven repo.
+
+The following options may be passed on the command line:
+
+-c, --cassandra-dir : Path to the Cassandra source directory.
+                      Defaults to the current working directory
+-r, --revision      : Git revision that you want to build a snapshot
+                      from. Defaults to the current checked out HEAD
+-v, --version       : The version # that you want to give the artifacts.
                       Defaults to whatever is specified in build.xml
 -u, --repo-url    	: The URL of the Maven repo where you intend to 
                       publish the snapshot artifacts
 -i, --repo-id     	: The identifier of the target repo from your 
                       Maven settings.xml 
 
-Of these options, the Cassandra source directory and the Maven repo
+
+
+Certain command options, the Cassandra source directory and the Maven repo
 URL/id can be set using an ini file located at ~/.csp 
-Any options set on the command line will override those in the config
+Any options passed on the command line will override those in the config
 file.

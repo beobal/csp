@@ -282,13 +282,6 @@ class publish(command):
         log()
         log()
 
-        if version is not None and not version.endswith("-SNAPSHOT"):
-            version += "-SNAPSHOT"
-            log("************************ WARNING ************************")
-            log("Only SNAPSHOT deployments are supported. The -SNAPSHOT")
-            log("modifier will be appended to the supplied version number")
-            log("*********************************************************")
-
         log('Building from Cassandra source dir ' + src_dir)
         if rev is None:
             log('Using the current git HEAD')
