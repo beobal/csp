@@ -101,11 +101,9 @@ def modify_create_version_file_target(build_xml):
     log("Modifying createVersionPropFile target")
     mvn_create_version_file_elem = build_xml.find(mvn_create_version_file_xpath)
     mvn_create_version_file_elem.insert(0, build_exec_elem('git', 'src.revision', 'rev-parse HEAD'))
-    mvn_create_version_file_elem.insert(0, build_exec_elem('git', 'src.branch', 'rev-parse --abbrev-ref HEAD'))
 
     property_file_elem = mvn_create_version_file_elem.find('propertyfile')
     add_property_to_file(property_file_elem, 'SourceRevision', '${src.revision}')
-    add_property_to_file(property_file_elem, 'SourceBranch', '${src.branch}')
     return build_xml
 
 
