@@ -70,12 +70,12 @@ def modify_mvn_install_target(build_xml):
 
 def modify_publish_target(build_xml):
     """Modify the "publish" target. We omit the "if=release"
-    condition and only publish the binary artifacts"""
+    condition and skip publishing the javadoc artifacts"""
     log("Modifying mvn publish target")
     publish_elem = build_xml.find(publish_elem_xpath)
     del publish_elem.attrib['if']
     for deploy_elem in publish_elem.findall('deploy'):
-        if deploy_elem.attrib['pomFile'].endswith('-dist.pom') or 'classifier' in deploy_elem.attrib:
+        if deploy_elem.attrib['pomFile'].endswith('-dist.pom') or ('classifier' in deploy_elem.attrib and deploy_elem.attrib['classifier'] == 'javadoc'):
             publish_elem.remove(deploy_elem)
     return build_xml
 
