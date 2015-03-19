@@ -74,11 +74,57 @@ def modify_publish_target(build_xml):
     log("Modifying mvn publish target")
     publish_elem = build_xml.find(publish_elem_xpath)
     del publish_elem.attrib['if']
+    deploy_elements = []
     for deploy_elem in publish_elem.findall('deploy'):
-        if deploy_elem.attrib['pomFile'].endswith('-dist.pom') or ('classifier' in deploy_elem.attrib and deploy_elem.attrib['classifier'] == 'javadoc'):
+        # remove the separate deploy targets for the dist-pom 
+        # also, instead of a separate deploy target for each classifier
+        # we should bundle the jar & source artifacts together into a single
+        # target so that we don't try and re-deploy a release pom
+        if deploy_elem.attrib['pomFile'].endswith('-parent.pom'):
+            # we don't need to modify the publishing of the parent pom 
+            pass
+        elif deploy_elem.attrib['pomFile'].endswith('-dist.pom'):
+            # skip the dist artifacts
+            publish_elem.remove(deploy_elem)    
+        else:
+            # this will be the deploy target for the main jar of either cassandra-all, 
+            # cassandra-thrift or cassandra-clientutil 
+            # instead of using the deploy macro (which calls out to mvn directly)
+            # and individually publishing the jar and source artifacts, 
+            # we want to use maven-ant-tasks's deploy task so we can attach source
+            # artifacts to the jars and publish in one hit, avoiding republishing 
+            # of release poms
             publish_elem.remove(deploy_elem)
+            deploy_elements.append(deploy_elem)
+
+    # for each of the deploy elements we removed, add back a new element that
+    # uses the deploy task directly
+
+    for deploy_elem in deploy_elements:
+        if 'classifier' not in deploy_elem.attrib:
+            artifact = deploy_elem.attrib['file']
+            new_deploy_elem = ET.SubElement(publish_elem, '%sdeploy' % mvn_namespace)
+            new_deploy_elem.set('file', artifact)
+            
+            repo_elem = ET.SubElement(new_deploy_elem, 'remoteRepository')
+            repo_elem.set('url', '${maven-repository-url}')
+            pom_elem = ET.SubElement(new_deploy_elem, 'pom')
+            pom_elem.set('refid', get_pom_id_from_artifact(artifact))
+            attach_elem = ET.SubElement(new_deploy_elem, 'attach')
+            attach_elem.set('type', 'jar')
+            attach_elem.set('classifier', 'sources')
+            attach_elem.set('file', artifact.replace('.jar', '-sources.jar'))
+            
+
     return build_xml
 
+def get_pom_id_from_artifact(artifact):
+    if "-thrift-" in artifact: 
+        return "thrift-pom"
+    elif "-clientutil-" in artifact: 
+        return "clientutil-pom"
+    else: 
+        return "allpom"
 
 def modify_mvn_deploy_macro(build_xml):
     """Here we modify the macrodef that defines the mvn:deploy operation.
